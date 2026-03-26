@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Snow Globe</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      width: 100%; height: 100%;
+      background: #2A246B;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    .globe-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .globe-wrapper {
+      position: relative;
+      display: inline-block;
+      cursor: grab;
+      transform-origin: center top;
+      will-change: transform;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    .globe-wrapper:active { cursor: grabbing; }
+
+    #snow-canvas {
+      display: block;
+      touch-action: none;
+    }
+
+    /* Loading overlay */
+    #loading-overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,0,0,0.4);
+      border-radius: 50% 50% 0 0;
+      transition: opacity 0.4s ease;
+    }
+
+    .spinner {
+      width: 36px; height: 36px;
+      border: 3px solid rgba(255,255,255,0.3);
+      border-top-color: rgba(255,255,255,0.9);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* CSS shake animation on tap */
+    @keyframes globe-shake {
+      0%   { transform: translateX(0); }
+      20%  { transform: translateX(-5px); }
+      40%  { transform: translateX(5px); }
+      60%  { transform: translateX(-4px); }
+      80%  { transform: translateX(4px); }
+      100% { transform: translateX(0); }
+    }
+
+    .globe-wrapper.shaking {
+      animation: globe-shake 120ms ease-out forwards;
+    }
+
+    /* Enable shake button */
+    #shake-btn {
+      display: none;
+      padding: 8px 18px;
+      border: none;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.18);
+      color: rgba(255,255,255,0.85);
+      font-size: 13px;
+      font-family: system-ui, sans-serif;
+      letter-spacing: 0.03em;
+      cursor: pointer;
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+      transition: background 0.2s, transform 0.1s;
+    }
+
+    #shake-btn:hover {
+      background: rgba(255,255,255,0.28);
+    }
+
+    #shake-btn:active {
+      transform: scale(0.96);
+    }
+
+    /* "Shake me!" hint */
+    #shake-hint {
+      position: absolute;
+      bottom: -36px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: rgba(255,255,255,0.8);
+      font-size: 13px;
+      font-family: system-ui, sans-serif;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.4s;
+      white-space: nowrap;
+    }
+
+    /* Responsive scaling */
+    @media (max-width: 520px) {
+      .globe-wrapper { transform: scale(0.75); }
+      .globe-wrapper.shaking { animation: globe-shake 120ms ease-out forwards; }
+    }
+
+    @media (max-width: 380px) {
+      .globe-wrapper { transform: scale(0.6); }
+    }
+  </style>
+</head>
+<body>
+
+<div class="globe-container">
+  <div class="globe-wrapper" id="globe-wrapper">
+    <canvas id="snow-canvas" width="500" height="600"></canvas>
+    <div id="loading-overlay"><div class="spinner"></div></div>
+    <div id="shake-hint">Shake me! ❄️</div>
+  </div>
+  <button id="shake-btn">📳 Enable shake</button>
+</div>
+
+<script>
+// ============================================================
+// === CONSTANTS ===
+// ============================================================
+
+// --- Asset paths ---
+const ASSET_ORB   = 'assets/orb.png';
+const ASSET_SCENE = 'assets/scene.png';
+const ASSET_BASE  = 'assets/base.png';
+
+// --- Layout ---
+const CANVAS_W     = 500;
+const CANVAS_H     = 600;
+const GLOBE_CENTER = { x: 250, y: 270 };
+const GLOBE_RADIUS = 190;
+
+// --- Particle limits ---
+const PARTICLE_MAX = 150;
+const IDLE_MIN     = 22;
+const IDLE_MAX     = 30;
+
+// --- Physics ---
+const GRAVITY       = 0.012;
+const DRAG          = 0.985;
+const SETTLE_SPEED  = 0.04;
+const FADE_DURATION = 180;
+
+// --- Idle spawning ---
+const IDLE_SPAWN_RATE = 0.14;
+
+// --- Interaction ---
+const TAP_MAX_DIST       = 8;
+const TAP_MAX_TIME       = 300;
+const TAP_STACK_WIN      = 500;
+const TAP_STACK_MAX      = 3;
+const DRAG_IMPULSE_SCALE = 3.5;
+
+// --- Device motion ---
+const MOTION_THRESHOLD     = 12;
+const MOTION_COOLDOWN_MS   = 350;
+const MOTION_IMPULSE_SCALE = 0.18;
+const MOTION_MAX_IMPULSE   = 6;
+
+// ============================================================
+// === STATE ===
+// ============================================================
+
+const canvas  = document.getElementById('snow-canvas');
+const ctx     = canvas.getContext('2d');
+const wrapper = document.getElementById('globe-wrapper');
+const overlay = document.getElementById('loading-overlay');
+const shakeBtn  = document.getElementById('shake-btn');
+const shakeHint = document.getElementById('shake-hint');
+
+let sceneImg, orbImg, baseImg;
+let assetsLoaded = false;
+
+let particles  = [];
+let frameCount = 0;
+
+// Interaction state
+let isDragging    = false;
+let dragStart     = null;
+let dragCurrent   = { x: 0, y: 0 };
+let lastTapTime   = 0;
+let tapStackCount = 0;
+
+// Motion state
+let prevAccel        = { x: 0, y: 0 };
+let lastMotionBurst  = 0;
+let motionActive     = false;
+
+// ============================================================
+// === ASSET LOADING ===
+// ============================================================
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload  = () => resolve(img);
+    img.onerror = () => {
+      console.warn(`[SnowGlobe] Failed to load asset: ${src}`);
+      resolve(null); // resolve null — fallback drawn at render time
+    };
+    img.src = src;
+  });
+}
+
+async function loadAssets() {
+  [sceneImg, orbImg, baseImg] = await Promise.all([
+    loadImage(ASSET_SCENE),
+    loadImage(ASSET_ORB),
+    loadImage(ASSET_BASE),
+  ]);
+  assetsLoaded = true;
+  overlay.style.opacity = '0';
+  setTimeout(() => { overlay.style.display = 'none'; }, 400);
+}
+
+// ============================================================
+// === PARTICLE FACTORY ===
+// ============================================================
+
+function rand(min, max) { return min + Math.random() * (max - min); }
+
+function randomPointInCircle(cx, cy, r, topFraction) {
+  // Spawn in top `topFraction` of the circle
+  for (let i = 0; i < 50; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const dist  = Math.sqrt(Math.random()) * r * 0.9;
+    const x = cx + Math.cos(angle) * dist;
+    const y = cy + Math.sin(angle) * dist;
+    if (y < cy + r * (topFraction * 2 - 1)) return { x, y };
+  }
+  return { x: cx + rand(-r * 0.7, r * 0.7), y: cy - r * 0.6 };
+}
+
+function createParticle(x, y, vx, vy, isIdle = false) {
+  const radius = rand(1.5, 4);
+  return {
+    x, y, vx, vy,
+    radius,
+    opacity:     rand(0.5, 1.0),
+    mass:        radius / 3,
+    wobble:      rand(0, Math.PI * 2),
+    wobbleSpeed: rand(0.02, 0.05),
+    wobbleAmp:   isIdle ? rand(0.5, 1.2) : rand(0.2, 0.7),
+    settling:    false,
+    settleCount: 0,
+    fadeTimer:   FADE_DURATION,
+  };
+}
+
+function spawnIdleParticle() {
+  const pos = randomPointInCircle(GLOBE_CENTER.x, GLOBE_CENTER.y, GLOBE_RADIUS, 0.25);
+  return createParticle(
+    pos.x, pos.y,
+    rand(-0.3, 0.3),
+    rand(0.2, 0.5),
+    true
+  );
+}
+
+function spawnBurstParticles(count, vxBias, vyBias) {
+  let spawned = 0;
+  // Recycle settled particles first
+  for (let i = particles.length - 1; i >= 0 && spawned < count; i--) {
+    if (particles[i].settling) {
+      particles.splice(i, 1);
+      spawned++;
+    }
+  }
+  const remaining = Math.min(count, PARTICLE_MAX - particles.length);
+  for (let i = 0; i < remaining; i++) {
+    const pos = randomPointInCircle(GLOBE_CENTER.x, GLOBE_CENTER.y, GLOBE_RADIUS, 0.2);
+    particles.push(createParticle(
+      pos.x, pos.y,
+      vxBias + rand(-1.5, 1.5),
+      vyBias + rand(0.3, 1.5)
+    ));
+  }
+}
+
+// ============================================================
+// === PHYSICS UPDATE ===
+// ============================================================
+
+function updateParticles() {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+
+    if (p.settling) {
+      p.fadeTimer -= 1;
+      p.opacity = Math.max(0, p.fadeTimer / FADE_DURATION);
+      if (p.fadeTimer <= 0) {
+        particles.splice(i, 1);
+        continue;
+      }
+      continue;
+    }
+
+    // Gravity
+    p.vy += GRAVITY * p.mass;
+
+    // Drag
+    p.vx *= DRAG;
+    p.vy *= DRAG;
+
+    // Wobble
+    p.x += Math.sin(frameCount * p.wobbleSpeed + p.wobble) * p.wobbleAmp;
+
+    // Position
+    p.x += p.vx;
+    p.y += p.vy;
+
+    // Globe boundary collision
+    const dx   = p.x - GLOBE_CENTER.x;
+    const dy   = p.y - GLOBE_CENTER.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist > GLOBE_RADIUS - p.radius) {
+      const nx = dx / dist;
+      const ny = dy / dist;
+      // Push back inside
+      p.x = GLOBE_CENTER.x + nx * (GLOBE_RADIUS - p.radius);
+      p.y = GLOBE_CENTER.y + ny * (GLOBE_RADIUS - p.radius);
+      // Reflect and dampen
+      const dot = p.vx * nx + p.vy * ny;
+      p.vx = (p.vx - 2 * dot * nx) * 0.2;
+      p.vy = (p.vy - 2 * dot * ny) * 0.2;
+    }
+
+    // Settle check
+    if (Math.abs(p.vx) + Math.abs(p.vy) < SETTLE_SPEED) {
+      p.settleCount++;
+      if (p.settleCount >= 3) {
+        p.settling = true;
+        p.vx = 0; p.vy = 0;
+      }
+    } else {
+      p.settleCount = 0;
+    }
+  }
+
+  // Idle spawning — maintain minimum count
+  if (particles.length < IDLE_MIN && Math.random() < IDLE_SPAWN_RATE) {
+    particles.push(spawnIdleParticle());
+  }
+}
+
+// ============================================================
+// === RENDER LOOP ===
+// ============================================================
+
+function drawFallback(x, y, w, h, label) {
+  ctx.fillStyle = 'rgba(100,120,140,0.6)';
+  ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  ctx.font = '14px system-ui';
+  ctx.textAlign = 'center';
+  ctx.fillText(label, x + w / 2, y + h / 2);
+}
+
+function render() {
+  ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+
+  if (!assetsLoaded) {
+    requestAnimationFrame(render);
+    return;
+  }
+
+  // 1. Scene (background — bottommost layer)
+  if (sceneImg) {
+    ctx.drawImage(sceneImg, 0, 0, CANVAS_W, CANVAS_H);
+  } else {
+    drawFallback(0, 0, CANVAS_W, CANVAS_H, 'scene.png');
+  }
+
+  // 2. Snow particles (clipped to globe interior, above scene)
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(GLOBE_CENTER.x, GLOBE_CENTER.y, GLOBE_RADIUS, 0, Math.PI * 2);
+  ctx.clip();
+
+  ctx.shadowBlur = 4;
+  ctx.shadowColor = 'rgba(255,255,255,0.8)';
+
+  for (const p of particles) {
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(255,255,255,${p.opacity.toFixed(3)})`;
+    ctx.fill();
+  }
+
+  ctx.shadowBlur = 0;
+  ctx.restore();
+
+  // 3. Glass orb shell (above snow)
+  if (orbImg) {
+    ctx.drawImage(orbImg, 0, 0, CANVAS_W, CANVAS_H);
+  } else {
+    ctx.beginPath();
+    ctx.arc(GLOBE_CENTER.x, GLOBE_CENTER.y, GLOBE_RADIUS, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(180,210,255,0.6)';
+    ctx.lineWidth = 6;
+    ctx.stroke();
+  }
+
+  // 4. Base (stand/pedestal — topmost, highest z-index)
+  if (baseImg) {
+    ctx.drawImage(baseImg, 0, 0, CANVAS_W, CANVAS_H);
+  } else {
+    drawFallback(150, 530, 200, 60, 'base.png');
+  }
+
+  frameCount++;
+  updateParticles();
+  requestAnimationFrame(render);
+}
+
+// ============================================================
+// === INTERACTION HANDLERS ===
+// ============================================================
+
+function applyImpulseToAll(impulseX, impulseY) {
+  for (const p of particles) {
+    p.vx += impulseX;
+    p.vy += impulseY;
+    p.settling   = false;
+    p.settleCount = 0;
+  }
+}
+
+function triggerTap(multiplier) {
+  const impulse = 0.4 * multiplier;
+  applyImpulseToAll(rand(-impulse, impulse), rand(-impulse, impulse));
+  spawnBurstParticles(60, 0, 0);
+  triggerShakeCSS();
+}
+
+function triggerDragRelease(dx, dy, timeDelta) {
+  const speed  = Math.min(Math.hypot(dx, dy) / Math.max(timeDelta, 1) * 1000, 30);
+  const mag    = Math.hypot(dx, dy) || 1;
+  const normX  = dx / mag;
+  const normY  = dy / mag;
+  const impulse = speed * DRAG_IMPULSE_SCALE * 0.05;
+  applyImpulseToAll(normX * impulse, normY * impulse);
+  const burstCount = Math.round(60 + (speed / 30) * 20);
+  spawnBurstParticles(burstCount, normX * 1.5, normY * 0.5);
+}
+
+function triggerShakeCSS() {
+  wrapper.classList.remove('shaking');
+  // Force reflow to restart animation
+  void wrapper.offsetWidth;
+  wrapper.classList.add('shaking');
+  setTimeout(() => wrapper.classList.remove('shaking'), 150);
+}
+
+// Pointer events
+wrapper.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  isDragging  = true;
+  dragStart   = { x: e.clientX, y: e.clientY, time: Date.now() };
+  dragCurrent = { x: e.clientX, y: e.clientY };
+  wrapper.setPointerCapture(e.pointerId);
+  // Clear any return transition temporarily
+  wrapper.style.transition = 'none';
+});
+
+wrapper.addEventListener('pointermove', (e) => {
+  if (!isDragging || !dragStart) return;
+  e.preventDefault();
+  dragCurrent = { x: e.clientX, y: e.clientY };
+  const dx = Math.max(-8, Math.min(8, (e.clientX - dragStart.x) * 0.3));
+  const dy = Math.max(-8, Math.min(8, (e.clientY - dragStart.y) * 0.3));
+  wrapper.style.transform = `translate(${dx}px, ${dy}px)`;
+});
+
+wrapper.addEventListener('pointerup', (e) => {
+  if (!isDragging || !dragStart) return;
+  e.preventDefault();
+  isDragging = false;
+
+  const dx        = e.clientX - dragStart.x;
+  const dy        = e.clientY - dragStart.y;
+  const timeDelta = Date.now() - dragStart.time;
+
+  // Reset CSS transform with ease-out
+  wrapper.style.transition = 'transform 200ms ease-out';
+  wrapper.style.transform  = '';
+
+  const isTap = Math.hypot(dx, dy) < TAP_MAX_DIST && timeDelta < TAP_MAX_TIME;
+
+  if (isTap) {
+    const now = Date.now();
+    if (now - lastTapTime < TAP_STACK_WIN) {
+      tapStackCount = Math.min(tapStackCount + 1, TAP_STACK_MAX);
+    } else {
+      tapStackCount = 1;
+    }
+    lastTapTime = now;
+    const multiplier = 1 + (tapStackCount - 1) * 0.4;
+    triggerTap(multiplier);
+  } else {
+    triggerDragRelease(dx, dy, timeDelta);
+  }
+
+  dragStart = null;
+});
+
+wrapper.addEventListener('pointercancel', () => {
+  isDragging = false;
+  dragStart  = null;
+  wrapper.style.transition = 'transform 200ms ease-out';
+  wrapper.style.transform  = '';
+});
+
+// ============================================================
+// === DEVICE MOTION HANDLER ===
+// ============================================================
+
+function handleMotion(event) {
+  if (!motionActive) return;
+  const accel = event.accelerationIncludingGravity;
+  if (!accel) return;
+
+  const ax = accel.x || 0;
+  const ay = accel.y || 0;
+
+  const deltaX = ax - prevAccel.x;
+  const deltaY = ay - prevAccel.y;
+  prevAccel = { x: ax, y: ay };
+
+  const magnitude = Math.hypot(deltaX, deltaY);
+  if (magnitude < MOTION_THRESHOLD) return;
+
+  const now = Date.now();
+  if (now - lastMotionBurst < MOTION_COOLDOWN_MS) return;
+  lastMotionBurst = now;
+
+  const normX   = deltaX / magnitude;
+  const normY   = deltaY / magnitude;
+  const impulse = Math.max(1, Math.min(magnitude * MOTION_IMPULSE_SCALE, MOTION_MAX_IMPULSE));
+
+  // Remap axes for landscape orientation
+  const angle = (screen.orientation && screen.orientation.angle) || 0;
+  let ix, iy;
+  if (angle === 90 || angle === 270) {
+    ix = normY * impulse;
+    iy = normX * impulse;
+  } else {
+    ix = normX * impulse;
+    iy = -normY * impulse; // invert Y: physical up = negative accel on iOS
+  }
+
+  applyImpulseToAll(ix, iy);
+  const burstCount = Math.round(40 + (impulse / MOTION_MAX_IMPULSE) * 40);
+  spawnBurstParticles(burstCount, ix * 0.3, iy * 0.3);
+}
+
+function activateMotion() {
+  motionActive = true;
+  window.addEventListener('devicemotion', handleMotion);
+  shakeBtn.style.display = 'none';
+  shakeHint.style.opacity = '1';
+  setTimeout(() => { shakeHint.style.opacity = '0'; }, 2000);
+}
+
+shakeBtn.addEventListener('click', async () => {
+  if (typeof DeviceMotionEvent !== 'undefined' &&
+      typeof DeviceMotionEvent.requestPermission === 'function') {
+    // iOS 13+ — needs permission
+    try {
+      const permission = await DeviceMotionEvent.requestPermission();
+      if (permission === 'granted') {
+        activateMotion();
+      } else {
+        shakeBtn.style.display = 'none';
+        console.log('[SnowGlobe] Motion permission denied.');
+      }
+    } catch (err) {
+      shakeBtn.style.display = 'none';
+      console.warn('[SnowGlobe] Motion permission error:', err);
+    }
+  } else {
+    // Android / non-iOS — no permission needed
+    activateMotion();
+  }
+});
+
+// ============================================================
+// === INIT ===
+// ============================================================
+
+async function init() {
+  // Load assets
+  await loadAssets();
+
+  // Seed idle particles
+  for (let i = 0; i < IDLE_MAX; i++) {
+    particles.push(spawnIdleParticle());
+  }
+
+  // Show shake button on touch-capable mobile devices
+  if ('DeviceMotionEvent' in window && navigator.maxTouchPoints > 1) {
+    shakeBtn.style.display = 'inline-block';
+  }
+
+  // Start render loop
+  requestAnimationFrame(render);
+}
+
+init();
+</script>
+</body>
+</html>
