@@ -81,27 +81,43 @@
     /* Enable shake button */
     #shake-btn {
       display: none;
-      padding: 8px 18px;
-      border: none;
+      position: absolute;
+      bottom: 44px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 9px 20px 9px 14px;
+      border: 1px solid rgba(255,255,255,0.22);
       border-radius: 999px;
-      background: rgba(255,255,255,0.18);
-      color: rgba(255,255,255,0.85);
+      background: rgba(20, 16, 60, 0.55);
+      color: rgba(255,255,255,0.92);
       font-size: 13px;
       font-family: system-ui, sans-serif;
-      letter-spacing: 0.03em;
+      letter-spacing: 0.04em;
       cursor: pointer;
-      backdrop-filter: blur(6px);
-      -webkit-backdrop-filter: blur(6px);
-      box-shadow: 0 2px 12px rgba(0,0,0,0.15);
-      transition: background 0.2s, transform 0.1s;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      box-shadow: 0 4px 18px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.12);
+      transition: background 0.2s, transform 0.1s, box-shadow 0.2s;
+      white-space: nowrap;
+      align-items: center;
+      gap: 8px;
+      z-index: 10;
     }
 
     #shake-btn:hover {
-      background: rgba(255,255,255,0.28);
+      background: rgba(40, 32, 90, 0.7);
+      box-shadow: 0 6px 22px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.15);
     }
 
     #shake-btn:active {
-      transform: scale(0.96);
+      transform: translateX(-50%) scale(0.96);
+    }
+
+    #shake-btn svg {
+      display: inline-block;
+      vertical-align: middle;
+      margin-right: 6px;
+      margin-bottom: 1px;
     }
 
     /* "Shake me!" hint */
@@ -137,8 +153,18 @@
     <canvas id="snow-canvas" width="500" height="600"></canvas>
     <div id="loading-overlay"><div class="spinner"></div></div>
     <div id="shake-hint">Shake me! ❄️</div>
+    <button id="shake-btn">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="7" y="2" width="10" height="20" rx="2" ry="2"/>
+        <line x1="2" y1="8" x2="4.5" y2="8" stroke="rgba(255,255,255,0.5)"/>
+        <line x1="2" y1="12" x2="4.5" y2="12" stroke="rgba(255,255,255,0.5)"/>
+        <line x1="2" y1="16" x2="4.5" y2="16" stroke="rgba(255,255,255,0.5)"/>
+        <line x1="19.5" y1="8" x2="22" y2="8" stroke="rgba(255,255,255,0.5)"/>
+        <line x1="19.5" y1="12" x2="22" y2="12" stroke="rgba(255,255,255,0.5)"/>
+        <line x1="19.5" y1="16" x2="22" y2="16" stroke="rgba(255,255,255,0.5)"/>
+      </svg>Enable shake
+    </button>
   </div>
-  <button id="shake-btn">📳 Enable shake</button>
 </div>
 
 <script>
@@ -259,7 +285,7 @@ function randomPointInCircle(cx, cy, r, topFraction) {
 }
 
 function createParticle(x, y, vx, vy, isIdle = false) {
-  const radius = rand(1.5, 4);
+  const radius = rand(1.725, 4.6);
   return {
     x, y, vx, vy,
     radius,
@@ -404,17 +430,12 @@ function render() {
   ctx.arc(GLOBE_CENTER.x, GLOBE_CENTER.y, GLOBE_RADIUS, 0, Math.PI * 2);
   ctx.clip();
 
-  ctx.shadowBlur = 4;
-  ctx.shadowColor = 'rgba(255,255,255,0.8)';
-
   for (const p of particles) {
     ctx.beginPath();
     ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
     ctx.fillStyle = `rgba(255,255,255,${p.opacity.toFixed(3)})`;
     ctx.fill();
   }
-
-  ctx.shadowBlur = 0;
   ctx.restore();
 
   // 3. Glass orb shell (above snow)
