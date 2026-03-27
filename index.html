@@ -120,6 +120,12 @@
       margin-bottom: 1px;
     }
 
+    /* Ensure button captures its own touches independently of the wrapper */
+    #shake-btn {
+      pointer-events: all;
+      touch-action: manipulation;
+    }
+
     /* "Shake me!" hint */
     #shake-hint {
       position: absolute;
@@ -609,6 +615,10 @@ function activateMotion() {
   shakeHint.style.opacity = '1';
   setTimeout(() => { shakeHint.style.opacity = '0'; }, 2000);
 }
+
+shakeBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+shakeBtn.addEventListener('pointermove', (e) => e.stopPropagation());
+shakeBtn.addEventListener('pointerup',   (e) => e.stopPropagation());
 
 shakeBtn.addEventListener('click', async () => {
   if (typeof DeviceMotionEvent !== 'undefined' &&
