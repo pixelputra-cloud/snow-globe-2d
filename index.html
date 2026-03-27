@@ -126,20 +126,6 @@
       touch-action: manipulation;
     }
 
-    /* "Shake me!" hint */
-    #shake-hint {
-      position: absolute;
-      bottom: -36px;
-      left: 50%;
-      transform: translateX(-50%);
-      color: rgba(255,255,255,0.8);
-      font-size: 13px;
-      font-family: system-ui, sans-serif;
-      pointer-events: none;
-      opacity: 0;
-      transition: opacity 0.4s;
-      white-space: nowrap;
-    }
 
     /* Responsive scaling */
     @media (max-width: 520px) {
@@ -158,7 +144,6 @@
   <div class="globe-wrapper" id="globe-wrapper">
     <canvas id="snow-canvas" width="500" height="600"></canvas>
     <div id="loading-overlay"><div class="spinner"></div></div>
-    <div id="shake-hint">Shake me! ❄️</div>
     <button id="shake-btn">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <rect x="7" y="2" width="10" height="20" rx="2" ry="2"/>
@@ -168,7 +153,7 @@
         <line x1="19.5" y1="8" x2="22" y2="8" stroke="rgba(255,255,255,0.5)"/>
         <line x1="19.5" y1="12" x2="22" y2="12" stroke="rgba(255,255,255,0.5)"/>
         <line x1="19.5" y1="16" x2="22" y2="16" stroke="rgba(255,255,255,0.5)"/>
-      </svg>Enable shake
+      </svg><span class="shake-label">Enable shake</span>
     </button>
   </div>
 </div>
@@ -225,7 +210,6 @@ const ctx     = canvas.getContext('2d');
 const wrapper = document.getElementById('globe-wrapper');
 const overlay = document.getElementById('loading-overlay');
 const shakeBtn  = document.getElementById('shake-btn');
-const shakeHint = document.getElementById('shake-hint');
 
 let sceneImg, orbImg, baseImg;
 let assetsLoaded = false;
@@ -611,9 +595,7 @@ function handleMotion(event) {
 function activateMotion() {
   motionActive = true;
   window.addEventListener('devicemotion', handleMotion);
-  shakeBtn.style.display = 'none';
-  shakeHint.style.opacity = '1';
-  setTimeout(() => { shakeHint.style.opacity = '0'; }, 2000);
+  shakeBtn.querySelector('.shake-label').textContent = 'Shake me';
 }
 
 shakeBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
