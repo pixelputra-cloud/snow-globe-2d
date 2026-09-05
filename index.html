@@ -164,9 +164,11 @@
 // ============================================================
 
 // --- Asset paths ---
-const ASSET_ORB   = 'assets/orb.png';
-const ASSET_SCENE = 'assets/scene.png';
-const ASSET_BASE  = 'assets/base.png';
+const ASSET_ORB         = 'assets/orb.png';
+const ASSET_SCENE       = 'assets/scene.png';
+const ASSET_BASE        = 'assets/base.png';
+const ASSET_SNOWFLAKE_1 = 'assets/snowflake_01.png';
+const ASSET_SNOWFLAKE_2 = 'assets/snowflake_02.png';
 
 // --- Layout ---
 const CANVAS_W     = 500;
@@ -211,7 +213,7 @@ const wrapper = document.getElementById('globe-wrapper');
 const overlay = document.getElementById('loading-overlay');
 const shakeBtn  = document.getElementById('shake-btn');
 
-let sceneImg, orbImg, baseImg;
+let sceneImg, orbImg, baseImg, snowflake1Img, snowflake2Img;
 let assetsLoaded = false;
 
 let particles  = [];
@@ -246,10 +248,12 @@ function loadImage(src) {
 }
 
 async function loadAssets() {
-  [sceneImg, orbImg, baseImg] = await Promise.all([
+  [sceneImg, orbImg, baseImg, snowflake1Img, snowflake2Img] = await Promise.all([
     loadImage(ASSET_SCENE),
     loadImage(ASSET_ORB),
     loadImage(ASSET_BASE),
+    loadImage(ASSET_SNOWFLAKE_1),
+    loadImage(ASSET_SNOWFLAKE_2),
   ]);
   assetsLoaded = true;
   overlay.style.opacity = '0';
@@ -281,12 +285,15 @@ function createParticle(x, y, vx, vy, isIdle = false) {
     radius,
     opacity:     rand(0.5, 1.0),
     mass:        radius / 3,
-    wobble:      rand(0, Math.PI * 2),
-    wobbleSpeed: rand(0.02, 0.05),
-    wobbleAmp:   isIdle ? rand(0.5, 1.2) : rand(0.2, 0.7),
-    settling:    false,
-    settleCount: 0,
-    fadeTimer:   FADE_DURATION,
+    wobble:       rand(0, Math.PI * 2),
+    wobbleSpeed:  rand(0.02, 0.05),
+    wobbleAmp:    isIdle ? rand(0.5, 1.2) : rand(0.2, 0.7),
+    flakeType:    Math.random() < 0.5 ? 0 : 1,
+    rotation:     rand(0, Math.PI * 2),
+    rotationSpeed: rand(-0.012, 0.012),
+    settling:     false,
+    settleCount:  0,
+    fadeTimer:    FADE_DURATION,
   };
 }
 
@@ -347,6 +354,7 @@ function updateParticles() {
 
     // Wobble
     p.x += Math.sin(frameCount * p.wobbleSpeed + p.wobble) * p.wobbleAmp;
+    p.rotation += p.rotationSpeed;
 
     // Position
     p.x += p.vx;
@@ -421,10 +429,21 @@ function render() {
   ctx.clip();
 
   for (const p of particles) {
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-    ctx.fillStyle = `rgba(255,255,255,${p.opacity.toFixed(3)})`;
-    ctx.fill();
+    const img  = p.flakeType === 0 ? snowflake1Img : snowflake2Img;
+    const half = p.radius * 2;
+    ctx.save();
+    ctx.globalAlpha = p.opacity;
+    ctx.translate(p.x, p.y);
+    ctx.rotate(p.rotation);
+    if (img) {
+      ctx.drawImage(img, -half, -half, half * 2, half * 2);
+    } else {
+      ctx.beginPath();
+      ctx.arc(0, 0, p.radius, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,255,1)';
+      ctx.fill();
+    }
+    ctx.restore();
   }
   ctx.restore();
 
