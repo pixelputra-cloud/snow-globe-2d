@@ -308,16 +308,12 @@ function spawnIdleParticle() {
 }
 
 function spawnBurstParticles(count, vxBias, vyBias) {
-  let spawned = 0;
-  // Recycle settled particles first
-  for (let i = particles.length - 1; i >= 0 && spawned < count; i--) {
-    if (particles[i].settling) {
-      particles.splice(i, 1);
-      spawned++;
-    }
+  // Evict ALL settling/fading particles so burst gets maximum fresh slots
+  for (let i = particles.length - 1; i >= 0; i--) {
+    if (particles[i].settling) particles.splice(i, 1);
   }
-  const remaining = Math.min(count, PARTICLE_MAX - particles.length);
-  for (let i = 0; i < remaining; i++) {
+  const toSpawn = Math.min(count, PARTICLE_MAX - particles.length);
+  for (let i = 0; i < toSpawn; i++) {
     const pos = randomPointInCircle(GLOBE_CENTER.x, GLOBE_CENTER.y, GLOBE_RADIUS, 0.2);
     particles.push(createParticle(
       pos.x, pos.y,
@@ -476,9 +472,9 @@ function render() {
 
 function applyImpulseToAll(impulseX, impulseY) {
   for (const p of particles) {
+    if (p.settling) continue; // spawnBurstParticles will evict these immediately after
     p.vx += impulseX;
     p.vy += impulseY;
-    p.settling   = false;
     p.settleCount = 0;
   }
 }
